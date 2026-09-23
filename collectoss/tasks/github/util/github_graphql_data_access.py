@@ -136,8 +136,14 @@ class GithubGraphQlDataAccess:
                 if not_found_error:
                     message = not_found_error.get("message", "Resource not found.")
                     raise NotFoundException(f"Could not find: {message}")
-                
-                raise Exception(f"Github Graphql Data Access Errors: {errors}")
+
+                # Anything else is transient or a bad query, and both should retry
+                if self.__only_permission_errors(errors) and json_response.get("data"):
+                    self.logger.warning(
+                        f"Github Graphql partial response, continuing with the data "
+                        f"that was returned: {self.__summarize_errors(errors)}")
+                else:
+                    raise Exception(f"Github Graphql Data Access Errors: {errors}")
 
         return response
         
@@ -286,3 +292,11 @@ class GithubGraphQlDataAccess:
     def __find_first_error_of_type(self, errors, type):
 
         return next((error for error in errors if error.get("type").lower() == type.lower()), None)
+
+    def __only_permission_errors(self, errors): # The key won't gain access on a retry
+
+        return all((error.get("type") or "").upper() == "FORBIDDEN" for error in errors)
+
+    def __summarize_errors(self, errors): # One repo produced forty of these in a run
+
+        return [(error.get("type"), error.get("path")) for error in errors]
